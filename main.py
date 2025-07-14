@@ -25,8 +25,9 @@ if os.path.exists(DB_FILE):
 else:
     users = {}
 
-# Временное хранилище при заполнении анкеты
+# Временное хранилище при заполнении анкеты и входящих лайков
 temp_profiles = {}
+pending_likes = {}
 
 questions = ["name", "gender", "age", "city", "looking_for", "about", "media"]
 
@@ -138,25 +139,32 @@ async def collect_profile(msg: Message):
 
         await msg.answer("✅ Отлично! Твоя анкета готова!", reply_markup=kb)
 
-def save_db():
-    with open(DB_FILE, "w", encoding="utf-8") as f:
-        json.dump(users, f, ensure_ascii=False, indent=2)
-
-def clean_old_profiles():
-    now = datetime.now()
-    to_delete = []
-    for uid, u in users.items():
-        last = datetime.fromisoformat(u.get("last_active", now.isoformat()))
-        if (now - last).days >= 30:
-            to_delete.append(uid)
-    for uid in to_delete:
-        users.pop(uid)
-    if to_delete:
-        save_db()
+        # Отправка уведомления, если кто-то ждал ответ
+        if user_id in pending_likes:
+            for liker_id in pending_likes[user_id]:
+                gender = "понравился" if users[liker_id]["gender"] == "Парень" else "понравилась"
+                kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="❤️ Принять", callback_data=f"matchlike_{liker_id}"),
+                     InlineKeyboardButton(text="👎 Отказ", callback_data="match_no")]
+                ])
+                await bot.send_message(chat_id=user_id, text=f"💌 Похоже, ты кому-то {gender}!", reply_markup=kb)
+            del pending_likes[user_id]
 
 async def show_profile(msg: Message):
     user_id = str(msg.from_user.id)
     now = datetime.now()
+
+    def clean_old_profiles():
+        to_delete = []
+        for uid, u in users.items():
+            last = datetime.fromisoformat(u.get("last_active", now.isoformat()))
+            if (now - last).days >= 30:
+                to_delete.append(uid)
+        for uid in to_delete:
+            users.pop(uid)
+        if to_delete:
+            save_db()
+
     clean_old_profiles()
 
     current_user = users[user_id]
@@ -215,46 +223,44 @@ async def handle_callback(callback: types.CallbackQuery):
             gender = "понравился" if current_user["gender"] == "Парень" else "понравилась"
             username = callback.from_user.username
             kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="❤️ Принять", url=f"https://t.me/{username}" if username else "")],
-                [InlineKeyboardButton(text="👎 Отказ", callback_data="match_no")]
+                [InlineKeyboardButton(text="❤️ Принять", callback_data=f"matchlike_{user_id}"),
+                 InlineKeyboardButton(text="👎 Отказ", callback_data="match_no")]
             ])
             await bot.send_message(chat_id=liked_id, text=f"💌 Похоже, ты кому-то {gender}!", reply_markup=kb)
+        else:
+            pending_likes.setdefault(liked_id, []).append(user_id)
 
-            liked_user = users[liked_id]
-            if liked_user.get("username"):
-                back_kb = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="❤️ Принять", url=f"https://t.me/{liked_user['username']}")],
-                    [InlineKeyboardButton(text="👎 Отказ", callback_data="match_no")]
-                ])
-                await bot.send_message(chat_id=user_id, text=f"🎉 У вас взаимная симпатия!", reply_markup=back_kb)
-
-        markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❤️", callback_data="none")]])
-        try:
-            await callback.message.edit_caption(caption="❤️ Ты лайкнул анкету!", reply_markup=markup)
-        except:
-            await callback.message.delete()
-            await bot.send_message(callback.from_user.id, "❤️ Ты лайкнул анкету!")
-
+        await callback.message.edit_reply_markup(reply_markup=None)
         await show_profile(callback.message)
 
     elif data.startswith("skip_"):
         skipped_id = data.split("_")[1]
         current_user["skips"][skipped_id] = now
         save_db()
-
-        markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="👎", callback_data="none")]])
-        try:
-            await callback.message.edit_caption(caption="👎 Пропущено", reply_markup=markup)
-        except:
-            await callback.message.delete()
-            await bot.send_message(callback.from_user.id, "👎 Пропущено")
-
+        await callback.message.edit_reply_markup(reply_markup=None)
         await show_profile(callback.message)
 
+    elif data.startswith("matchlike_"):
+        liked_user_id = data.split("_")[1]
+        liked_user = users.get(liked_user_id)
+        if liked_user and liked_user.get("username"):
+            url = f"https://t.me/{liked_user['username']}"
+            media_type = "photo" if liked_user['media'].startswith("AgAC") else "video"
+            caption = f"🎉 У вас взаимная симпатия!\n👉 @{liked_user['username']}\n<b>{liked_user['name']}, {liked_user['age']}</b>\n{liked_user['about']}"
+            if media_type == "photo":
+                await bot.send_photo(chat_id=user_id, photo=liked_user['media'], caption=caption)
+            else:
+                await bot.send_video(chat_id=user_id, video=liked_user['media'], caption=caption)
+
     await callback.answer()
+
+def save_db():
+    with open(DB_FILE, "w", encoding="utf-8") as f:
+        json.dump(users, f, ensure_ascii=False, indent=2)
 
 async def main():
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
+
