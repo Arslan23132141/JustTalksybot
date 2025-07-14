@@ -7,8 +7,10 @@ import os
 import json
 from datetime import datetime, timedelta
 
+from aiogram.client.default import DefaultBotProperties
+
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
+bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
 # БД-файл
@@ -159,7 +161,6 @@ async def show_profile(msg: Message):
 
     current_user = users[user_id]
 
-    # Проверка лимита лайков
     times = [datetime.fromisoformat(t) for t in current_user.get("like_times", [])]
     times = [t for t in times if (now - t).total_seconds() < LIKE_RESET_HOURS * 3600]
     if len(times) >= LIKE_LIMIT_PER_DAY:
@@ -187,9 +188,7 @@ async def show_profile(msg: Message):
              InlineKeyboardButton(text="👎", callback_data=f"skip_{uid}")]
         ])
 
-        caption = f"<b>{u['name']}, {u['age']}</b>\n{u['about']}\n👀 Ищет: {u['looking_for']}\n"
-        if u.get("username"):
-            caption += f"@{u['username']}"
+        caption = f"<b>{u['name']}, {u['age']}</b>\n{u['about']}\n👀 Ищет: {u['looking_for']}"
 
         if media_type == "photo":
             await msg.answer_photo(photo=u["media"], caption=caption, reply_markup=markup)
@@ -221,13 +220,24 @@ async def handle_callback(callback: types.CallbackQuery):
             ])
             await bot.send_message(chat_id=liked_id, text=f"💌 Похоже, ты кому-то {gender}!", reply_markup=kb)
 
-        await callback.message.edit_text("❤️ Ты лайкнул анкету!")
+        markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❤️", callback_data="none")]])
+        try:
+            await callback.message.edit_caption(caption="❤️ Ты лайкнул анкету!", reply_markup=markup)
+        except:
+            await callback.message.delete()
+            await bot.send_message(callback.from_user.id, "❤️ Ты лайкнул анкету!")
 
     elif data.startswith("skip_"):
         skipped_id = data.split("_")[1]
         current_user["skips"][skipped_id] = now
         save_db()
-        await callback.message.edit_text("👎 Пропущено")
+
+        markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="👎", callback_data="none")]])
+        try:
+            await callback.message.edit_caption(caption="👎 Пропущено", reply_markup=markup)
+        except:
+            await callback.message.delete()
+            await bot.send_message(callback.from_user.id, "👎 Пропущено")
 
     await callback.answer()
 
