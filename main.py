@@ -220,12 +220,22 @@ async def handle_callback(callback: types.CallbackQuery):
             ])
             await bot.send_message(chat_id=liked_id, text=f"💌 Похоже, ты кому-то {gender}!", reply_markup=kb)
 
+            liked_user = users[liked_id]
+            if liked_user.get("username"):
+                back_kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="❤️ Принять", url=f"https://t.me/{liked_user['username']}")],
+                    [InlineKeyboardButton(text="👎 Отказ", callback_data="match_no")]
+                ])
+                await bot.send_message(chat_id=user_id, text=f"🎉 У вас взаимная симпатия!", reply_markup=back_kb)
+
         markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❤️", callback_data="none")]])
         try:
             await callback.message.edit_caption(caption="❤️ Ты лайкнул анкету!", reply_markup=markup)
         except:
             await callback.message.delete()
             await bot.send_message(callback.from_user.id, "❤️ Ты лайкнул анкету!")
+
+        await show_profile(callback.message)
 
     elif data.startswith("skip_"):
         skipped_id = data.split("_")[1]
@@ -238,6 +248,8 @@ async def handle_callback(callback: types.CallbackQuery):
         except:
             await callback.message.delete()
             await bot.send_message(callback.from_user.id, "👎 Пропущено")
+
+        await show_profile(callback.message)
 
     await callback.answer()
 
