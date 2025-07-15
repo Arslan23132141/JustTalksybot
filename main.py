@@ -287,10 +287,11 @@ async def handle_callback(callback: types.CallbackQuery):
     await callback.answer()
 
 def save_db():
+    os.makedirs("data", exist_ok=True)
     with open(DB_FILE, "w", encoding="utf-8") as f:
         json.dump(users, f, ensure_ascii=False, indent=2)
     logging.info(f"DB saved with {len(users)} users.")
-
+    
 async def main():
     await dp.start_polling(bot)
 
