@@ -17,7 +17,7 @@ bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTM
 dp = Dispatcher()
 
 # БД-файл
-DB_FILE = "users.json"
+DB_FILE = "data/users.json"
 LIKE_LIMIT_PER_DAY = 200
 LIKE_RESET_HOURS = 24
 
