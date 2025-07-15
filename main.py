@@ -20,14 +20,16 @@ dp = Dispatcher()
 DB_FILE = "data/users.json"
 LIKE_LIMIT_PER_DAY = 200
 LIKE_RESET_HOURS = 24
+# Загрузка из файла + создание если нет
+os.makedirs("data", exist_ok=True)  # гарантируем, что папка data есть
 
-# Загрузка из файла
+if not os.path.exists(DB_FILE):
+    with open(DB_FILE, "w", encoding="utf-8") as f:
+        json.dump({}, f, ensure_ascii=False, indent=2)
+
 try:
-    if os.path.exists(DB_FILE):
-        with open(DB_FILE, "r", encoding="utf-8") as f:
-            users = json.load(f)
-    else:
-        users = {}
+    with open(DB_FILE, "r", encoding="utf-8") as f:
+        users = json.load(f)
 except (json.JSONDecodeError, FileNotFoundError):
     users = {}
 
