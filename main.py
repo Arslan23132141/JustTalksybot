@@ -224,7 +224,7 @@ async def show_profile(msg: Message):
 
 @dp.callback_query()
 async def handle_callback(callback: types.CallbackQuery):
-    user_id = str(callback.from_user.id)
+    user_id = callback.from_user.id
     data = callback.data
 
     if user_id not in users:
