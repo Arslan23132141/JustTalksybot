@@ -5,9 +5,12 @@ from aiogram.enums import ParseMode
 import asyncio
 import os
 import json
+import logging
 from datetime import datetime, timedelta
 
 from aiogram.client.default import DefaultBotProperties
+
+logging.basicConfig(level=logging.INFO)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
@@ -19,10 +22,13 @@ LIKE_LIMIT_PER_DAY = 200
 LIKE_RESET_HOURS = 24
 
 # Загрузка из файла
-if os.path.exists(DB_FILE):
-    with open(DB_FILE, "r", encoding="utf-8") as f:
-        users = json.load(f)
-else:
+try:
+    if os.path.exists(DB_FILE):
+        with open(DB_FILE, "r", encoding="utf-8") as f:
+            users = json.load(f)
+    else:
+        users = {}
+except (json.JSONDecodeError, FileNotFoundError):
     users = {}
 
 # Временное хранилище при заполнении анкеты и входящих лайков
@@ -112,6 +118,7 @@ async def collect_profile(msg: Message):
             await msg.answer("Пожалуйста, отправь фото или видео")
             return
         profile["media"] = msg.photo[-1].file_id if msg.photo else msg.video.file_id
+        profile["media_type"] = "photo" if msg.photo else "video"
 
         users[user_id] = {
             "name": profile["name"],
@@ -121,6 +128,7 @@ async def collect_profile(msg: Message):
             "looking_for": profile["looking_for"],
             "about": profile["about"],
             "media": profile["media"],
+            "media_type": profile["media_type"],
             "username": msg.from_user.username,
             "shown": [],
             "likes": [],
@@ -139,7 +147,6 @@ async def collect_profile(msg: Message):
 
         await msg.answer("✅ Отлично! Твоя анкета готова!", reply_markup=kb)
 
-        # Отправка уведомления, если кто-то ждал ответ
         if user_id in pending_likes:
             for liker_id in pending_likes[user_id]:
                 gender = "понравился" if users[liker_id]["gender"] == "Парень" else "понравилась"
@@ -154,6 +161,10 @@ async def show_profile(msg: Message):
     user_id = str(msg.from_user.id)
     now = datetime.now()
 
+    if user_id not in users:
+        await msg.answer("❌ Заполни анкету сначала с помощью /start")
+        return
+
     def clean_old_profiles():
         to_delete = []
         for uid, u in users.items():
@@ -162,6 +173,8 @@ async def show_profile(msg: Message):
                 to_delete.append(uid)
         for uid in to_delete:
             users.pop(uid)
+        for u in users.values():
+            u["shown"] = [sid for sid in u["shown"] if sid in users]
         if to_delete:
             save_db()
 
@@ -171,6 +184,7 @@ async def show_profile(msg: Message):
 
     times = [datetime.fromisoformat(t) for t in current_user.get("like_times", [])]
     times = [t for t in times if (now - t).total_seconds() < LIKE_RESET_HOURS * 3600]
+    current_user["like_times"] = [t.isoformat() for t in times]  # очистка старых
     if len(times) >= LIKE_LIMIT_PER_DAY:
         await msg.answer("Ты достиг лимита лайков на сегодня (200). Попробуй позже.")
         return
@@ -190,7 +204,7 @@ async def show_profile(msg: Message):
         current_user["shown"].append(uid)
         save_db()
 
-        media_type = "photo" if u["media"].startswith("AgAC") else "video"
+        media_type = u.get("media_type", "photo")
         markup = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="❤️", callback_data=f"like_{uid}"),
              InlineKeyboardButton(text="👎", callback_data=f"skip_{uid}")]
@@ -210,27 +224,39 @@ async def show_profile(msg: Message):
 async def handle_callback(callback: types.CallbackQuery):
     user_id = str(callback.from_user.id)
     data = callback.data
+
+    if user_id not in users:
+        await callback.message.answer("❌ Пожалуйста, сначала заполни анкету.")
+        await callback.answer()
+        return
+
     current_user = users[user_id]
     now = datetime.now().isoformat()
 
     if data.startswith("like_"):
         liked_id = data.split("_")[1]
-        current_user["likes"].append(liked_id)
+        if liked_id not in current_user["likes"]:
+            current_user["likes"].append(liked_id)
         current_user["like_times"].append(now)
+        current_user["like_times"] = [
+            t for t in current_user["like_times"]
+            if (datetime.now() - datetime.fromisoformat(t)).total_seconds() < LIKE_RESET_HOURS * 3600
+        ]
         save_db()
 
-        if user_id in users[liked_id]["likes"]:
+        if liked_id in users and user_id in users[liked_id]["likes"]:
             gender = "понравился" if current_user["gender"] == "Парень" else "понравилась"
-            username = callback.from_user.username
-            kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="❤️ Принять", callback_data=f"matchlike_{user_id}"),
-                 InlineKeyboardButton(text="👎 Отказ", callback_data="match_no")]
-            ])
-            await bot.send_message(chat_id=liked_id, text=f"💌 Похоже, ты кому-то {gender}!", reply_markup=kb)
+            if users[liked_id].get("username"):
+                kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="❤️ Принять", callback_data=f"matchlike_{user_id}"),
+                     InlineKeyboardButton(text="👎 Отказ", callback_data="match_no")]
+                ])
+                await bot.send_message(chat_id=liked_id, text=f"💌 Похоже, ты кому-то {gender}!", reply_markup=kb)
         else:
             pending_likes.setdefault(liked_id, []).append(user_id)
 
         await callback.message.edit_reply_markup(reply_markup=None)
+        await asyncio.sleep(0.2)
         await show_profile(callback.message)
 
     elif data.startswith("skip_"):
@@ -238,29 +264,35 @@ async def handle_callback(callback: types.CallbackQuery):
         current_user["skips"][skipped_id] = now
         save_db()
         await callback.message.edit_reply_markup(reply_markup=None)
+        await asyncio.sleep(0.2)
         await show_profile(callback.message)
 
     elif data.startswith("matchlike_"):
         liked_user_id = data.split("_")[1]
         liked_user = users.get(liked_user_id)
-        if liked_user and liked_user.get("username"):
-            url = f"https://t.me/{liked_user['username']}"
-            media_type = "photo" if liked_user['media'].startswith("AgAC") else "video"
-            caption = f"🎉 У вас взаимная симпатия!\n👉 @{liked_user['username']}\n<b>{liked_user['name']}, {liked_user['age']}</b>\n{liked_user['about']}"
-            if media_type == "photo":
-                await bot.send_photo(chat_id=user_id, photo=liked_user['media'], caption=caption)
+        if liked_user:
+            if liked_user.get("username"):
+                media_type = liked_user.get("media_type", "photo")
+                caption = f"🎉 У вас взаимная симпатия!\n👉 @{liked_user['username']}\n<b>{liked_user['name']}, {liked_user['age']}</b>\n{liked_user['about']}"
+                if media_type == "photo":
+                    await bot.send_photo(chat_id=user_id, photo=liked_user['media'], caption=caption)
+                else:
+                    await bot.send_video(chat_id=user_id, video=liked_user['media'], caption=caption)
             else:
-                await bot.send_video(chat_id=user_id, video=liked_user['media'], caption=caption)
+                await bot.send_message(chat_id=user_id, text="🎉 У вас взаимная симпатия! Но у этого пользователя нет username 😔")
+
+    elif data == "match_no":
+        await callback.answer("Отказ отправлен.")
 
     await callback.answer()
 
 def save_db():
     with open(DB_FILE, "w", encoding="utf-8") as f:
         json.dump(users, f, ensure_ascii=False, indent=2)
+    logging.info(f"DB saved with {len(users)} users.")
 
 async def main():
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
-
