@@ -375,7 +375,8 @@ async def handle_callback(callback: types.CallbackQuery):
 
     await callback.answer()
     elif data == "match_no":
-        await callback.message.delete()
+    await callback.message.delete()
+    await callback.answer()
 
 def save_db():
     os.makedirs("data", exist_ok=True)
