@@ -3,14 +3,13 @@ from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKey
 from aiogram.filters import Command
 from aiogram.enums import ParseMode
 import asyncio
-import os
 import logging
 from datetime import datetime
 
 from db import get_user, save_user, get_matching_profiles, update_user_like
 
 logging.basicConfig(level=logging.INFO)
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+BOT_TOKEN = "ТОКЕН_ТВОЕГО_БОТА"
 bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher()
 
