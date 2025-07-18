@@ -177,11 +177,6 @@ async def collect_profile(msg: Message):
         await save_user(profile)
         del temp_profiles[user_id]
         save_db()
-
-        kb = ReplyKeyboardMarkup(keyboard=[
-            [KeyboardButton(text="🔍 Найти")],
-            [KeyboardButton(text="✏️ Изменить анкету")],
-            [KeyboardButton(text="⚙️ Настройки")]
         kb = ReplyKeyboardMarkup([
             [KeyboardButton("🔍 Найти")],
             [KeyboardButton("✏️ Изменить анкету")],
